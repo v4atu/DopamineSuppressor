@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">DopamineSuppressor</string>
+    <string name="guard_service_label">DopamineSuppressor</string>
+    <string name="guard_service_description">Detecta qué app está en pantalla para medir el tiempo de uso y bloquear las apps que superen su límite diario. No lee el contenido de las pantallas.</string>
+
+    <string name="perm_title">Permisos</string>
+    <string name="perm_usage_title">Acceso a datos de uso</string>
+    <string name="perm_a11y_title">Servicio de accesibilidad</string>
+    <string name="perm_battery_title">Sin optimización de batería (opcional)</string>
+    <string name="perm_granted">Concedido</string>
+    <string name="perm_missing">Falta</string>
+    <string name="perm_open">Abrir ajuste</string>
+    <string name="perm_hint">Si Android no te deja activar el servicio de accesibilidad (apps instaladas fuera de la tienda), ve a Ajustes → Apps → DopamineSuppressor → menú ⋮ → «Permitir configuración restringida» y vuelve a intentarlo.</string>
+
+    <string name="apps_title">Apps</string>
+    <string name="app_no_limit">Sin límite</string>
+    <string name="app_row_limited">Hoy: %1$s · Límite: %2$s</string>
+    <string name="app_row_limited_off">Hoy: %1$s · Límite: %2$s (desactivado)</string>
+    <string name="app_row_unlimited_used">Hoy: %1$s · Sin límite</string>
+
+    <string name="editor_title">Límite diario de %1$s</string>
+    <string name="editor_hours">Horas</string>
+    <string name="editor_minutes">Minutos</string>
+    <string name="editor_active">Activo</string>
+    <string name="editor_save">Guardar</string>
+    <string name="editor_remove">Quitar límite</string>
+    <string name="editor_cancel">Cancelar</string>
+    <string name="editor_invalid">El límite debe ser mayor a 0 minutos.</string>
+</resources>

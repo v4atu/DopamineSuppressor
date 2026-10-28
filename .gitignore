@@ -1,0 +1,28 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Firma de la app: nunca al control de versiones
+keystore.properties
+*.jks
+*.p12
+*.keystore
+
+# APK y mapping de R8 generados por Android Studio: el APK va como adjunto de una Release
+/app/release/
+
+# Preferencias locales del IDE
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
