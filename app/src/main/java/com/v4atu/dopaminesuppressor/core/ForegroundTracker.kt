@@ -66,6 +66,16 @@ class ForegroundTracker(
         return track(pkg, evaluate(pkg))
     }
 
+    /** Lo que el servicio lleva contado hoy por app limitada, incluida la sesión abierta (diagnóstico). */
+    fun usedSnapshot(): Map<String, Long> {
+        val snapshot = HashMap(counter.snapshot())
+        val pkg = current
+        if (pkg != null && pkg in limits()) {
+            snapshot[pkg] = (snapshot[pkg] ?: 0L) + (clock.elapsedMillis() - since)
+        }
+        return snapshot
+    }
+
     private fun switchTo(pkg: String): Action {
         closeSession()
         current = pkg

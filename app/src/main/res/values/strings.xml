@@ -16,6 +16,7 @@
     <string name="app_no_limit">Sin límite</string>
     <string name="app_row_limited">Hoy: %1$s · Límite: %2$s</string>
     <string name="app_row_limited_off">Hoy: %1$s · Límite: %2$s (desactivado)</string>
+    <string name="app_row_counted"> · Servicio: %1$s</string>
     <string name="app_row_unlimited_used">Hoy: %1$s · Sin límite</string>
 
     <string name="editor_title">Límite diario de %1$s</string>

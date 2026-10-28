@@ -164,6 +164,29 @@ class ForegroundTrackerTest {
     }
 
     @Test
+    fun `el contador desfasado se corrige al sembrar y bloquea con la UI`() {
+        val t = tracker()
+        // El servicio solo había contado 2 min, pero UsageStats (lo que ve la UI) dice 6 de 5.
+        counter.seed(mapOf("a" to 2 * minute))
+        assertEquals(Action.Schedule("a", 3 * minute), t.onWindowChanged("a"))
+
+        counter.seed(mapOf("a" to 6 * minute))
+        assertEquals(Action.Block("a"), t.onSeeded("a"))
+    }
+
+    @Test
+    fun `usedSnapshot incluye la sesion abierta de la app limitada`() {
+        val t = tracker()
+        counter.seed(mapOf("a" to minute))
+        t.onWindowChanged("a")
+        clock.advance(30_000)
+        assertEquals(mapOf("a" to minute + 30_000), t.usedSnapshot())
+
+        t.onWindowChanged("b")
+        assertEquals(mapOf("a" to minute + 30_000), t.usedSnapshot())
+    }
+
+    @Test
     fun `pantalla apagada no cuenta`() {
         val t = tracker()
         t.onWindowChanged("a")

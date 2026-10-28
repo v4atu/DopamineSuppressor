@@ -22,6 +22,7 @@ import com.v4atu.dopaminesuppressor.R
 import com.v4atu.dopaminesuppressor.data.AppLimit
 import com.v4atu.dopaminesuppressor.data.LimitsRepository
 import com.v4atu.dopaminesuppressor.data.UsageSeeder
+import com.v4atu.dopaminesuppressor.guard.GuardState
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
@@ -149,7 +150,16 @@ class MainActivity : AppCompatActivity() {
         val used = usedToday
         val rows = apps
             // UsageSeeder solo devuelve apps con uso: si ya se leyó, una app ausente usó 0.
-            .map { AppRow(it.packageName, it.label, limits[it.packageName], used?.let { u -> u[it.packageName] ?: 0L }) }
+            .map {
+                val limit = limits[it.packageName]
+                AppRow(
+                    packageName = it.packageName,
+                    label = it.label,
+                    limit = limit,
+                    usedTodayMs = used?.let { u -> u[it.packageName] ?: 0L },
+                    countedMs = limit?.let { l -> GuardState.counted[l.packageName] ?: 0L },
+                )
+            }
             .sortedWith(compareBy({ it.limit == null }, { it.label.lowercase() }))
         adapter.submitList(rows)
     }

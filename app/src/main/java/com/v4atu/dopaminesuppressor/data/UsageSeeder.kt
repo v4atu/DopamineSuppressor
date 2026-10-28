@@ -2,51 +2,32 @@ package com.v4atu.dopaminesuppressor.data
 
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import com.v4atu.dopaminesuppressor.core.UsageAggregator
+import com.v4atu.dopaminesuppressor.core.UsageEvent
+import com.v4atu.dopaminesuppressor.core.UsageEventType
+import com.v4atu.dopaminesuppressor.core.UsageSummary
 
 /**
- * Lee `UsageStatsManager.queryEvents` una sola vez por llamada (SPEC §5). Debe llamarse
- * fuera del hilo principal.
+ * Lee `UsageStatsManager.queryEvents` una sola vez por llamada (SPEC §5) y delega el conteo en
+ * `UsageAggregator`. Debe llamarse fuera del hilo principal.
  */
 class UsageSeeder(private val usm: UsageStatsManager) {
 
-    /**
-     * @param totals ms usados en el rango por cada paquete de `limited`. Una sesión que sigue
-     *   abierta al final se cuenta hasta `end`.
-     * @param foreground última app con `ACTIVITY_RESUMED` sin `ACTIVITY_PAUSED` posterior, o `null`.
-     */
-    class Result(val totals: Map<String, Long>, val foreground: String?)
-
-    fun read(begin: Long, end: Long, limited: Set<String>): Result {
+    fun read(begin: Long, end: Long, limited: Set<String>): UsageSummary {
         val events = usm.queryEvents(begin, end)
         val event = UsageEvents.Event()
-        val open = HashMap<String, Long>()
-        val totals = HashMap<String, Long>()
-        var foreground: String? = null
-
-        fun close(pkg: String, at: Long) {
-            val start = open.remove(pkg) ?: return
-            if (pkg in limited) totals.merge(pkg, at - start, Long::plus)
-        }
-
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            val pkg = event.packageName
-            when (event.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED -> {
-                    open.putIfAbsent(pkg, event.timeStamp)
-                    foreground = pkg
+        val relevant = sequence {
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val type = when (event.eventType) {
+                    UsageEvents.Event.ACTIVITY_RESUMED -> UsageEventType.RESUMED
+                    UsageEvents.Event.ACTIVITY_PAUSED -> UsageEventType.PAUSED
+                    UsageEvents.Event.SCREEN_NON_INTERACTIVE -> UsageEventType.SCREEN_OFF
+                    else -> continue
                 }
-                UsageEvents.Event.ACTIVITY_PAUSED -> {
-                    close(pkg, event.timeStamp)
-                    if (foreground == pkg) foreground = null
-                }
-                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
-                    open.keys.toList().forEach { close(it, event.timeStamp) }
-                    foreground = null
-                }
+                yield(UsageEvent(type, event.packageName, event.timeStamp))
             }
         }
-        open.keys.toList().forEach { close(it, end) }
-        return Result(totals, foreground)
+        return UsageAggregator.summarize(relevant, end, limited)
     }
 }

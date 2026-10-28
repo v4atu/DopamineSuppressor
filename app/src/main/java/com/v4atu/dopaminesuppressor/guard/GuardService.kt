@@ -35,6 +35,10 @@ class GuardService : AccessibilityService() {
     private var limitsMs: Map<String, Long> = emptyMap()
     private var limitsLoaded = false
 
+    // Lectura de UsageStats en curso y petición pendiente (solo hilo principal).
+    private var seeding = false
+    private var reseedRequested = false
+
     private val tracker = ForegroundTracker(
         clock = AndroidClock,
         counter = counter,
@@ -111,8 +115,12 @@ class GuardService : AccessibilityService() {
         if (first || added.isNotEmpty()) seedFromUsageStats() else apply(tracker.refresh())
     }
 
-    /** Cancela el temporizador anterior y aplica la decisión del tracker (siempre en el hilo principal). */
-    private fun apply(action: Action) {
+    /**
+     * Cancela el temporizador anterior y aplica la decisión del tracker (siempre en el hilo principal).
+     * Con `reconcile`, una app limitada que pasa a primer plano se contrasta con UsageStats, que es
+     * lo que muestra la UI: así el bloqueo no depende de que el contador propio esté al día.
+     */
+    private fun apply(action: Action, reconcile: Boolean = true) {
         when (action) {
             Action.Ignored -> return
             Action.Idle -> handler.removeCallbacks(timer)
@@ -123,28 +131,41 @@ class GuardService : AccessibilityService() {
             is Action.Schedule -> {
                 handler.removeCallbacks(timer)
                 handler.postDelayed(timer, action.delayMs)
+                if (reconcile) seedFromUsageStats()
             }
         }
+        GuardState.counted = tracker.usedSnapshot()
     }
 
     /**
      * Siembra el conteo de hoy desde UsageStats (SPEC §5), una vez y fuera del hilo principal.
      * El resultado ya incluye la sesión abierta, así que el tracker reinicia su sesión (`onSeeded`).
+     * Solo hay una lectura a la vez; si llega otra petición mientras tanto, se repite al terminar.
      */
     private fun seedFromUsageStats() {
         val seeder = seeder ?: return
         val limited = limitsMs.keys
         if (limited.isEmpty()) {
-            apply(tracker.onSeeded(null))
+            apply(tracker.onSeeded(null), reconcile = false)
             return
         }
+        if (seeding) {
+            reseedRequested = true
+            return
+        }
+        seeding = true
         background?.execute {
             val end = System.currentTimeMillis()
             val begin = counter.day.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
             val result = seeder.read(begin, end, limited)
             handler.post {
+                seeding = false
                 counter.seed(result.totals)
-                apply(tracker.onSeeded(result.foreground))
+                apply(tracker.onSeeded(result.foreground), reconcile = false)
+                if (reseedRequested) {
+                    reseedRequested = false
+                    seedFromUsageStats()
+                }
             }
         }
     }

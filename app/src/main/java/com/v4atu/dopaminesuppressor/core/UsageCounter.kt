@@ -12,6 +12,8 @@ class UsageCounter(private val clock: Clock) {
 
     fun usedMs(pkg: String): Long = usedMs[pkg] ?: 0L
 
+    fun snapshot(): Map<String, Long> = HashMap(usedMs)
+
     fun add(pkg: String, ms: Long) {
         if (ms <= 0L) return
         usedMs[pkg] = usedMs(pkg) + ms
