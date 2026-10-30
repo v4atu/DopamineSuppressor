@@ -26,8 +26,10 @@ class ForegroundTracker(
     fun onWindowChanged(pkg: String): Action {
         if (isIgnored(pkg) || pkg == current) return Action.Ignored
         // Tras bloquear, la propia app emite otro evento ~1 s después; no hay que bloquear dos veces.
-        if (pkg == lastBlockedPkg && clock.elapsedMillis() - lastBlockedAt < BLOCK_DEBOUNCE_MS) {
-            return Action.Ignored
+        // Pero también puede ser una reapertura real: no se descarta, se vuelve a comprobar al terminar la ventana.
+        if (pkg == lastBlockedPkg) {
+            val sinceBlock = clock.elapsedMillis() - lastBlockedAt
+            if (sinceBlock < BLOCK_DEBOUNCE_MS) return recheckAfterBlock(pkg, BLOCK_DEBOUNCE_MS - sinceBlock)
         }
         return switchTo(pkg)
     }
@@ -82,6 +84,17 @@ class ForegroundTracker(
         since = clock.elapsedMillis()
         sessionDay = counter.day
         return track(pkg, evaluate(pkg))
+    }
+
+    /**
+     * La app reaparece dentro de la ventana anti-repetición. Se adopta como actual y se programa
+     * `refresh()` para cuando termine: si sigue delante se bloquea; si el launcher pasa primero, lo cancela.
+     */
+    private fun recheckAfterBlock(pkg: String, delayMs: Long): Action {
+        current = pkg
+        since = clock.elapsedMillis()
+        sessionDay = counter.day
+        return Action.Schedule(pkg, delayMs)
     }
 
     private fun track(pkg: String, action: Action): Action {

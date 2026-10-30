@@ -140,7 +140,7 @@ class MainActivity : AppCompatActivity() {
         val all = apps.map { it.packageName }.toSet()
         usedToday = withContext(Dispatchers.IO) {
             val begin = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            UsageSeeder(usm).read(begin, System.currentTimeMillis(), all).totals
+            UsageSeeder(usm, UsageSeeder.homePackages(packageManager)).read(begin, System.currentTimeMillis(), all).totals
         }
         render()
     }

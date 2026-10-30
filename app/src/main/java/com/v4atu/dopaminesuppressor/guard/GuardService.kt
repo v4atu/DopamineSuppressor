@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.util.Log // TEMP-DIAG
 import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
 import com.v4atu.dopaminesuppressor.core.Action
@@ -28,7 +29,10 @@ import kotlinx.coroutines.launch
 class GuardService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
-    private val timer = Runnable { apply(tracker.refresh()) }
+    private val timer = Runnable {
+        Log.d(TAG, "timer fired") // TEMP-DIAG
+        apply(tracker.refresh())
+    }
     private val counter = UsageCounter(AndroidClock)
 
     // Límites activos en ms por paquete. Solo se toca desde el hilo principal.
@@ -57,6 +61,7 @@ class GuardService : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    Log.d(TAG, "screen off") // TEMP-DIAG
                     handler.removeCallbacks(timer)
                     apply(tracker.onScreenOff())
                 }
@@ -72,7 +77,7 @@ class GuardService : AccessibilityService() {
             getSystemService(InputMethodManager::class.java).enabledInputMethodList
                 .forEach { add(it.packageName) }
         }
-        seeder = UsageSeeder(getSystemService(UsageStatsManager::class.java))
+        seeder = UsageSeeder(getSystemService(UsageStatsManager::class.java), UsageSeeder.homePackages(packageManager))
         background = Executors.newSingleThreadExecutor()
 
         val filter = IntentFilter().apply {
@@ -89,6 +94,7 @@ class GuardService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
+        Log.d(TAG, "event pkg=$pkg cls=${event.className}") // TEMP-DIAG
         apply(tracker.onWindowChanged(pkg))
     }
 
@@ -121,6 +127,7 @@ class GuardService : AccessibilityService() {
      * lo que muestra la UI: así el bloqueo no depende de que el contador propio esté al día.
      */
     private fun apply(action: Action, reconcile: Boolean = true) {
+        Log.d(TAG, "action=$action reconcile=$reconcile") // TEMP-DIAG
         when (action) {
             Action.Ignored -> return
             Action.Idle -> handler.removeCallbacks(timer)
@@ -160,6 +167,7 @@ class GuardService : AccessibilityService() {
             val result = seeder.read(begin, end, limited)
             handler.post {
                 seeding = false
+                Log.d(TAG, "seeded totals=${result.totals} foreground=${result.foreground}") // TEMP-DIAG
                 counter.seed(result.totals)
                 apply(tracker.onSeeded(result.foreground), reconcile = false)
                 if (reseedRequested) {
@@ -190,6 +198,7 @@ class GuardService : AccessibilityService() {
     }
 
     private companion object {
+        const val TAG = "Guard" // TEMP-DIAG
         const val SYSTEM_UI = "com.android.systemui"
         const val UNLOCK_WINDOW_MS = 10_000L
         const val RETRY_DELAY_MS = 500L

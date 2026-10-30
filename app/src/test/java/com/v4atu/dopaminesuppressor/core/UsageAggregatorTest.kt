@@ -12,8 +12,8 @@ class UsageAggregatorTest {
     private fun paused(pkg: String, t: Long) = UsageEvent(UsageEventType.PAUSED, pkg, t)
     private fun screenOff(t: Long) = UsageEvent(UsageEventType.SCREEN_OFF, null, t)
 
-    private fun summarize(vararg events: UsageEvent, end: Long = 1_000_000L) =
-        UsageAggregator.summarize(events.asSequence(), end, limited)
+    private fun summarize(vararg events: UsageEvent, end: Long = 1_000_000L, home: Set<String> = emptySet()) =
+        UsageAggregator.summarize(events.asSequence(), end, limited, home)
 
     @Test
     fun `suma sesiones completas y varias aperturas`() {
@@ -72,5 +72,76 @@ class UsageAggregatorTest {
         // Si se pierde un PAUSED, el segundo RESUMED no reinicia la sesión: se cuenta desde el primero.
         val s = summarize(resumed("a", 0), resumed("a", 50_000), paused("a", 60_000))
         assertEquals(60_000L, s.totals["a"])
+    }
+
+    // Recientes con «live tile» (Quickstep): la app queda RESUMED junto al launcher, sin PAUSED.
+
+    @Test
+    fun `recientes con tarjeta en vivo no suma tiempo`() {
+        // Secuencia capturada en el Pixel: Instagram y el launcher RESUMED a la vez, 92 s en Recientes.
+        val s = summarize(
+            resumed("a", 0),
+            resumed("home", 10_000),
+            paused("a", 102_000),
+            paused("home", 105_000),
+            home = setOf("home"),
+        )
+        assertEquals(10_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `el launcher en primer plano cierra la sesion abierta de otra app`() {
+        val s = summarize(resumed("a", 0), resumed("home", 10_000), end = 100_000L, home = setOf("home"))
+        assertEquals(10_000L, s.totals["a"])
+        assertEquals("home", s.foreground)
+    }
+
+    @Test
+    fun `tocar la tarjeta en vivo reabre la sesion al salir el launcher`() {
+        // Al tocar la tarjeta no llega un RESUMED nuevo de la app: sigue sin PAUSED.
+        val s = summarize(
+            resumed("a", 0),
+            resumed("home", 10_000),
+            paused("home", 40_000),
+            end = 100_000L,
+            home = setOf("home"),
+        )
+        assertEquals(10_000L + 60_000L, s.totals["a"])
+        assertEquals("a", s.foreground)
+    }
+
+    @Test
+    fun `si la app se pausa mientras el launcher esta delante no se reabre`() {
+        val s = summarize(
+            resumed("a", 0),
+            resumed("home", 10_000),
+            paused("a", 50_000),
+            paused("home", 60_000),
+            end = 100_000L,
+            home = setOf("home"),
+        )
+        assertEquals(10_000L, s.totals["a"])
+        assertNull(s.foreground)
+    }
+
+    @Test
+    fun `la pantalla apagada descarta las sesiones cerradas por el launcher`() {
+        val s = summarize(
+            resumed("a", 0),
+            resumed("home", 10_000),
+            screenOff(50_000),
+            resumed("home", 100_000),
+            paused("home", 110_000),
+            end = 200_000L,
+            home = setOf("home"),
+        )
+        assertEquals(10_000L, s.totals["a"])
+        assertNull(s.foreground)
+    }
+
+    @Test
+    fun `sin paquetes de launcher el comportamiento no cambia`() {
+        val s = summarize(resumed("a", 0), resumed("home", 10_000), paused("a", 50_000))
+        assertEquals(50_000L, s.totals["a"])
     }
 }

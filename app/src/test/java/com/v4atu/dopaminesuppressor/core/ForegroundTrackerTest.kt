@@ -111,10 +111,42 @@ class ForegroundTrackerTest {
         clock.advance(5 * minute)
         assertEquals(Action.Block("a"), t.refresh())
 
+        // Dentro de la ventana no se bloquea otra vez, pero tampoco se descarta el evento:
+        // puede ser una reapertura real (Pixel, 12:14:59), así que se vuelve a comprobar al terminar.
         clock.advance(900)
-        assertEquals(Action.Ignored, t.onWindowChanged("a"))
-        clock.advance(1_000)
+        assertEquals(Action.Schedule("a", 600), t.onWindowChanged("a"))
+        clock.advance(600)
+        assertEquals(Action.Block("a"), t.refresh())
+    }
+
+    @Test
+    fun `el eco tras bloquear no vuelve a bloquear si la app ya no esta delante`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(5 * minute)
+        assertEquals(Action.Block("a"), t.refresh())
+
+        clock.advance(900)
+        assertEquals(Action.Schedule("a", 600), t.onWindowChanged("a"))
+        // El launcher pasa al frente antes de que venza la re-comprobación.
+        clock.advance(100)
+        assertEquals(Action.Idle, t.onWindowChanged("home"))
+        clock.advance(600)
+        assertEquals(Action.Idle, t.refresh())
+    }
+
+    @Test
+    fun `la reapertura dentro de la ventana no deja a la app sin bloquear ni sin contar`() {
+        val t = tracker()
+        counter.seed(mapOf("a" to 5 * minute))
         assertEquals(Action.Block("a"), t.onWindowChanged("a"))
+
+        clock.advance(1_000)
+        assertEquals(Action.Schedule("a", 500), t.onWindowChanged("a"))
+        clock.advance(500)
+        assertEquals(Action.Block("a"), t.refresh())
+        // Cuenta desde la reapertura (0,5 s), igual que haría UsageStats desde su RESUMED.
+        assertEquals(5 * minute + 500L, counter.usedMs("a"))
     }
 
     @Test
