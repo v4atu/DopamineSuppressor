@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">DopamineSuppressor</string>
+    <string name="app_name">Dopamine Suppressor</string>
     <string name="guard_service_label">DopamineSuppressor</string>
     <string name="guard_service_description">Detecta qué app está en pantalla para medir el tiempo de uso y bloquear las apps que superen su límite diario. No lee el contenido de las pantallas.</string>
 
