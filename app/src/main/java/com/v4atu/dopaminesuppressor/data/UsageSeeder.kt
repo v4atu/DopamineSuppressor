@@ -30,7 +30,7 @@ class UsageSeeder(private val usm: UsageStatsManager, private val home: Set<Stri
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> UsageEventType.SCREEN_OFF
                     else -> continue
                 }
-                yield(UsageEvent(type, event.packageName, event.timeStamp))
+                yield(UsageEvent(type, event.packageName, event.timeStamp, event.className))
             }
         }
         return UsageAggregator.summarize(relevant, end, limited, home)

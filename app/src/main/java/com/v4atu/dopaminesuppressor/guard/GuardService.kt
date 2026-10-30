@@ -17,7 +17,10 @@ import com.v4atu.dopaminesuppressor.core.UsageCounter
 import com.v4atu.dopaminesuppressor.data.AppLimit
 import com.v4atu.dopaminesuppressor.data.LimitsRepository
 import com.v4atu.dopaminesuppressor.data.UsageSeeder
+import java.io.File // TEMP-DIAG
+import java.time.LocalTime // TEMP-DIAG
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter // TEMP-DIAG
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
@@ -30,8 +33,13 @@ class GuardService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val timer = Runnable {
-        Log.d(TAG, "timer fired") // TEMP-DIAG
+        diag("timer fired") // TEMP-DIAG
         apply(tracker.refresh())
+    }
+    // Confirma con UsageStats la app en primer plano tras salir de una limitada (SPEC §4).
+    private val verify = Runnable {
+        diag("verify fired") // TEMP-DIAG
+        resolveForeground(retry = true, windowMs = VERIFY_WINDOW_MS)
     }
     private val counter = UsageCounter(AndroidClock)
 
@@ -61,11 +69,14 @@ class GuardService : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> {
-                    Log.d(TAG, "screen off") // TEMP-DIAG
-                    handler.removeCallbacks(timer)
+                    diag("screen off") // TEMP-DIAG
+                    cancelPending()
                     apply(tracker.onScreenOff())
                 }
-                Intent.ACTION_USER_PRESENT -> resolveForeground(retry = true)
+                Intent.ACTION_USER_PRESENT -> {
+                    diag("user present") // TEMP-DIAG
+                    resolveForeground(retry = true)
+                }
             }
         }
     }
@@ -79,6 +90,11 @@ class GuardService : AccessibilityService() {
         }
         seeder = UsageSeeder(getSystemService(UsageStatsManager::class.java), UsageSeeder.homePackages(packageManager))
         background = Executors.newSingleThreadExecutor()
+        diagExecutor = Executors.newSingleThreadExecutor() // TEMP-DIAG
+        diagLog = DiagLog(File(filesDir, "guard-diag.log"), DIAG_MAX_BYTES) { // TEMP-DIAG
+            LocalTime.now().format(DIAG_TIME)
+        }
+        diag("service connected") // TEMP-DIAG
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -93,9 +109,9 @@ class GuardService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
-        Log.d(TAG, "event pkg=$pkg cls=${event.className}") // TEMP-DIAG
-        apply(tracker.onWindowChanged(pkg))
+        val pkg = event.packageName?.toString()
+        diag("event pkg=$pkg cls=${event.className}") // TEMP-DIAG
+        apply(tracker.onWindowChanged(pkg ?: return))
     }
 
     override fun onInterrupt() = Unit
@@ -107,6 +123,9 @@ class GuardService : AccessibilityService() {
         runCatching { unregisterReceiver(screenReceiver) }
         background?.shutdownNow()
         background = null
+        diag("service destroyed") // TEMP-DIAG
+        diagExecutor?.shutdown() // TEMP-DIAG
+        diagExecutor = null // TEMP-DIAG
         super.onDestroy()
     }
 
@@ -127,21 +146,25 @@ class GuardService : AccessibilityService() {
      * lo que muestra la UI: así el bloqueo no depende de que el contador propio esté al día.
      */
     private fun apply(action: Action, reconcile: Boolean = true) {
-        Log.d(TAG, "action=$action reconcile=$reconcile") // TEMP-DIAG
+        diag("action=$action reconcile=$reconcile") // TEMP-DIAG
         when (action) {
             Action.Ignored -> return
-            Action.Idle -> handler.removeCallbacks(timer)
+            Action.Idle -> cancelPending()
             is Action.Block -> {
-                handler.removeCallbacks(timer)
+                cancelPending()
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
             is Action.Schedule -> {
-                handler.removeCallbacks(timer)
+                cancelPending()
                 handler.postDelayed(timer, action.delayMs)
                 if (reconcile) seedFromUsageStats()
             }
+            is Action.Verify -> {
+                cancelPending()
+                handler.postDelayed(verify, action.delayMs)
+            }
         }
-        GuardState.counted = tracker.usedSnapshot()
+        diag("counted=${tracker.usedSnapshot()}") // TEMP-DIAG
     }
 
     /**
@@ -167,7 +190,7 @@ class GuardService : AccessibilityService() {
             val result = seeder.read(begin, end, limited)
             handler.post {
                 seeding = false
-                Log.d(TAG, "seeded totals=${result.totals} foreground=${result.foreground}") // TEMP-DIAG
+                diag("seeded totals=${result.totals} foreground=${result.foreground}") // TEMP-DIAG
                 counter.seed(result.totals)
                 apply(tracker.onSeeded(result.foreground), reconcile = false)
                 if (reseedRequested) {
@@ -182,14 +205,15 @@ class GuardService : AccessibilityService() {
      * Al desbloquear no siempre llega un evento de ventana (SPEC §4): se pregunta a UsageStats.
      * Si el `ACTIVITY_RESUMED` aún no está disponible, se reintenta una vez tras 500 ms.
      */
-    private fun resolveForeground(retry: Boolean) {
+    private fun resolveForeground(retry: Boolean, windowMs: Long = UNLOCK_WINDOW_MS) {
         val seeder = seeder ?: return
         background?.execute {
             val end = System.currentTimeMillis()
-            val foreground = seeder.read(end - UNLOCK_WINDOW_MS, end, emptySet()).foreground
+            val foreground = seeder.read(end - windowMs, end, emptySet()).foreground
             handler.post {
+                diag("resolve retry=$retry windowMs=$windowMs foreground=$foreground") // TEMP-DIAG
                 if (foreground == null && retry) {
-                    handler.postDelayed({ resolveForeground(retry = false) }, RETRY_DELAY_MS)
+                    handler.postDelayed({ resolveForeground(retry = false, windowMs = windowMs) }, RETRY_DELAY_MS)
                 } else {
                     apply(tracker.onUserPresent(foreground))
                 }
@@ -197,10 +221,30 @@ class GuardService : AccessibilityService() {
         }
     }
 
+    // TEMP-DIAG: logcat más archivo `files/guard-diag.log` (leer con `adb shell run-as <paquete> cat files/guard-diag.log`).
+    private var diagLog: DiagLog? = null
+    private var diagExecutor: ExecutorService? = null
+
+    private fun diag(message: String) { // TEMP-DIAG
+        Log.d(TAG, message)
+        val log = diagLog ?: return
+        diagExecutor?.execute { log.append(message) }
+    }
+
+    /** Cancela el temporizador de bloqueo y la confirmación de primer plano pendientes. */
+    private fun cancelPending() {
+        handler.removeCallbacks(timer)
+        handler.removeCallbacks(verify)
+    }
+
     private companion object {
         const val TAG = "Guard" // TEMP-DIAG
+        const val DIAG_MAX_BYTES = 200_000L // TEMP-DIAG
+        val DIAG_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS") // TEMP-DIAG
         const val SYSTEM_UI = "com.android.systemui"
         const val UNLOCK_WINDOW_MS = 10_000L
+        // La confirmación debe ver el RESUMED de la app aunque sea anterior al desbloqueo.
+        const val VERIFY_WINDOW_MS = 5 * 60_000L
         const val RETRY_DELAY_MS = 500L
     }
 }

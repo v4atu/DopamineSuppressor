@@ -128,9 +128,10 @@ class ForegroundTrackerTest {
 
         clock.advance(900)
         assertEquals(Action.Schedule("a", 600), t.onWindowChanged("a"))
-        // El launcher pasa al frente antes de que venza la re-comprobación.
+        // El launcher pasa al frente antes de que venza la re-comprobación: se pide confirmar el primer
+        // plano (no hay bloqueo) y la re-comprobación pendiente queda cancelada.
         clock.advance(100)
-        assertEquals(Action.Idle, t.onWindowChanged("home"))
+        assertEquals(Action.Verify(1_000L), t.onWindowChanged("home"))
         clock.advance(600)
         assertEquals(Action.Idle, t.refresh())
     }
@@ -248,6 +249,58 @@ class ForegroundTrackerTest {
         val t = tracker()
         assertEquals(Action.Idle, t.onUserPresent(null))
         assertEquals(Action.Idle, t.onUserPresent("systemui"))
+    }
+
+    // Un evento tardío del paquete anterior (p. ej. el selector de compartir al cerrarse) puede llegar
+    // después del de la app limitada y dejar al tracker apuntando a un paquete sin límite.
+
+    @Test
+    fun `salir de una app limitada a otra sin limite pide confirmar el primer plano`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(30_000)
+        assertEquals(Action.Verify(1_000L), t.onWindowChanged("b"))
+    }
+
+    @Test
+    fun `confirmar que la app limitada sigue delante reprograma el temporizador`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(30_000)
+        t.onWindowChanged("b")
+        clock.advance(1_000)
+        assertEquals(Action.Schedule("a", 5 * minute - 30_000), t.onUserPresent("a"))
+    }
+
+    @Test
+    fun `confirmar que sigue la app sin limite no pide otra confirmacion`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        t.onWindowChanged("b")
+        clock.advance(1_000)
+        assertEquals(Action.Idle, t.onUserPresent("b"))
+    }
+
+    @Test
+    fun `entre apps sin limite no se pide confirmacion`() {
+        val t = tracker()
+        assertEquals(Action.Idle, t.onWindowChanged("b"))
+        assertEquals(Action.Idle, t.onWindowChanged("c"))
+    }
+
+    @Test
+    fun `tras bloquear una app el launcher no pide confirmacion`() {
+        val t = tracker()
+        limits["a"] = 0L
+        assertEquals(Action.Block("a"), t.onWindowChanged("a"))
+        assertEquals(Action.Idle, t.onWindowChanged("launcher"))
+    }
+
+    @Test
+    fun `la pantalla apagada no pide confirmacion`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        assertEquals(Action.Idle, t.onScreenOff())
     }
 
     @Test

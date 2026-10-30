@@ -41,7 +41,10 @@ class ForegroundTracker(
         return Action.Idle
     }
 
-    /** Al desbloquear no siempre llega un evento de ventana; el servicio resuelve la app con UsageStats. */
+    /**
+     * El servicio resuelve la app en primer plano con UsageStats y la entrega aquí: al desbloquear (no
+     * siempre llega un evento de ventana) o al confirmar una acción [Action.Verify].
+     */
     fun onUserPresent(pkg: String?): Action {
         if (pkg == null || isIgnored(pkg)) return Action.Idle
         return switchTo(pkg)
@@ -79,11 +82,14 @@ class ForegroundTracker(
     }
 
     private fun switchTo(pkg: String): Action {
+        val leftLimited = current?.let { it != pkg && it in limits() } == true
         closeSession()
         current = pkg
         since = clock.elapsedMillis()
         sessionDay = counter.day
-        return track(pkg, evaluate(pkg))
+        val action = evaluate(pkg)
+        // Un evento tardío del paquete anterior puede dejar a la app limitada sin seguimiento: se confirma.
+        return track(pkg, if (leftLimited && action == Action.Idle) Action.Verify(VERIFY_DELAY_MS) else action)
     }
 
     /**
@@ -139,5 +145,6 @@ class ForegroundTracker(
 
     private companion object {
         const val BLOCK_DEBOUNCE_MS = 1_500L
+        const val VERIFY_DELAY_MS = 1_000L
     }
 }

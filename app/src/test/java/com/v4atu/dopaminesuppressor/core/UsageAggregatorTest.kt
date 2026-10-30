@@ -8,8 +8,8 @@ class UsageAggregatorTest {
 
     private val limited = setOf("a")
 
-    private fun resumed(pkg: String, t: Long) = UsageEvent(UsageEventType.RESUMED, pkg, t)
-    private fun paused(pkg: String, t: Long) = UsageEvent(UsageEventType.PAUSED, pkg, t)
+    private fun resumed(pkg: String, t: Long, cls: String? = null) = UsageEvent(UsageEventType.RESUMED, pkg, t, cls)
+    private fun paused(pkg: String, t: Long, cls: String? = null) = UsageEvent(UsageEventType.PAUSED, pkg, t, cls)
     private fun screenOff(t: Long) = UsageEvent(UsageEventType.SCREEN_OFF, null, t)
 
     private fun summarize(vararg events: UsageEvent, end: Long = 1_000_000L, home: Set<String> = emptySet()) =
@@ -39,6 +39,64 @@ class UsageAggregatorTest {
             resumed("a", 10_000), paused("a", 30_000),
         )
         assertEquals(30_000L, s.totals["a"])
+    }
+
+    // Varias actividades de un mismo paquete: el paquete sigue en primer plano mientras quede alguna abierta.
+
+    @Test
+    fun `dos actividades solapadas del mismo paquete cuentan hasta que se pausa la ultima`() {
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            resumed("a", 10_000, "Modal"),
+            paused("a", 20_000, "Main"),
+            paused("a", 50_000, "Modal"),
+        )
+        assertEquals(50_000L, s.totals["a"])
+        assertNull(s.foreground)
+    }
+
+    @Test
+    fun `el paquete sigue en primer plano mientras quede una actividad abierta`() {
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            resumed("a", 10_000, "Modal"),
+            paused("a", 20_000, "Main"),
+            end = 60_000L,
+        )
+        assertEquals(60_000L, s.totals["a"])
+        assertEquals("a", s.foreground)
+    }
+
+    @Test
+    fun `un PAUSED de una actividad que no estaba abierta no cierra otra del mismo paquete`() {
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            paused("a", 10_000, "Other"),
+            paused("a", 30_000, "Main"),
+        )
+        assertEquals(30_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `la misma actividad pausada y reabierta no duplica tiempo`() {
+        val s = summarize(
+            resumed("a", 0, "Main"), paused("a", 10_000, "Main"),
+            resumed("a", 10_000, "Main"), paused("a", 30_000, "Main"),
+        )
+        assertEquals(30_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `la pantalla apagada cierra todas las actividades abiertas de un paquete`() {
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            resumed("a", 10_000, "Modal"),
+            screenOff(40_000),
+            resumed("a", 100_000, "Main"),
+            paused("a", 110_000, "Main"),
+        )
+        assertEquals(50_000L, s.totals["a"])
+        assertNull(s.foreground)
     }
 
     @Test

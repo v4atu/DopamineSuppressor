@@ -13,4 +13,11 @@ sealed interface Action {
 
     /** Volver a evaluar `pkg` dentro de `delayMs` (límite o medianoche, lo que llegue primero). */
     data class Schedule(val pkg: String, val delayMs: Long) : Action
+
+    /**
+     * Se salió de una app limitada hacia un paquete sin límite, lo que puede ser un evento tardío del
+     * paquete anterior. Dentro de `delayMs` hay que confirmar con UsageStats qué app está delante y
+     * entregarla con `onUserPresent`.
+     */
+    data class Verify(val delayMs: Long) : Action
 }

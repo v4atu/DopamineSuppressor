@@ -23,8 +23,6 @@ data class AppRow(
     val label: String,
     val limit: AppLimit?,
     val usedTodayMs: Long?,
-    /** Lo que ha contado el servicio (diagnóstico temporal), solo para apps con límite. */
-    val countedMs: Long? = null,
 )
 
 class AppsAdapter(
@@ -74,11 +72,7 @@ class AppsAdapter(
                 limit == null -> ctx.getString(R.string.app_row_unlimited_used, used)
                 else -> {
                     val res = if (limit.enabled) R.string.app_row_limited else R.string.app_row_limited_off
-                    val base = ctx.getString(res, used ?: "—", DurationFormat.minutes(limit.dailyLimitMinutes))
-                    val counted = row.countedMs?.let {
-                        ctx.getString(R.string.app_row_counted, DurationFormat.millis(it))
-                    }.orEmpty()
-                    base + counted
+                    ctx.getString(res, used ?: "—", DurationFormat.minutes(limit.dailyLimitMinutes))
                 }
             }
         }
