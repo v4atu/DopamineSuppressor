@@ -251,6 +251,37 @@ class ForegroundTrackerTest {
         assertEquals(Action.Idle, t.onUserPresent("systemui"))
     }
 
+    // Al encender la pantalla directo a una app, el evento de ventana llega antes que el RESUMED de
+    // UsageStats: un desbloqueo sin app resuelta no debe cancelar el temporizador ya programado.
+
+    @Test
+    fun `al desbloquear sin app resuelta conserva el temporizador de la app en seguimiento`() {
+        val t = tracker()
+        assertEquals(Action.Schedule("a", 5 * minute), t.onWindowChanged("a"))
+        clock.advance(1_000)
+        assertEquals(Action.Ignored, t.onUserPresent(null))
+        clock.advance(5 * minute)
+        assertEquals(Action.Block("a"), t.refresh())
+    }
+
+    @Test
+    fun `al desbloquear con un paquete ignorado conserva el temporizador de la app en seguimiento`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(1_000)
+        assertEquals(Action.Ignored, t.onUserPresent("systemui"))
+        clock.advance(5 * minute)
+        assertEquals(Action.Block("a"), t.refresh())
+    }
+
+    @Test
+    fun `tras apagar la pantalla un desbloqueo sin app resuelta no hace nada`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        t.onScreenOff()
+        assertEquals(Action.Idle, t.onUserPresent(null))
+    }
+
     // Un evento tardío del paquete anterior (p. ej. el selector de compartir al cerrarse) puede llegar
     // después del de la app limitada y dejar al tracker apuntando a un paquete sin límite.
 
@@ -358,5 +389,67 @@ class ForegroundTrackerTest {
         t.onWindowChanged("a")
         c.advance(30_000) // 00:00:00 exacto
         assertEquals(Action.Schedule("a", 5 * minute), t.refresh())
+    }
+
+    // Latido (04-nov): un parpadeo del launcher hizo perder la app limitada y nadie volvió a seguirla.
+
+    @Test
+    fun `el latido recupera una app limitada que el seguimiento perdio`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(2 * minute)
+        assertEquals(Action.Verify(1_000), t.onWindowChanged("launcher"))
+        assertEquals(Action.Ignored, t.onUserPresent(null)) // UsageStats no la vio: se queda perdida
+        clock.advance(10 * minute)
+        assertEquals(Action.Schedule("a", 3 * minute), t.onHeartbeat("a"))
+    }
+
+    @Test
+    fun `el latido no toca la app que ya esta en seguimiento`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(minute)
+        assertEquals(Action.Ignored, t.onHeartbeat("a"))
+        clock.advance(minute)
+        t.onWindowChanged("b")
+        assertEquals(2 * minute, counter.usedMs("a"))
+    }
+
+    @Test
+    fun `el latido ignora apps sin limite nulos y paquetes ignorados`() {
+        val t = tracker()
+        assertEquals(Action.Ignored, t.onHeartbeat("b"))
+        assertEquals(Action.Ignored, t.onHeartbeat(null))
+        assertEquals(Action.Ignored, t.onHeartbeat("ime"))
+    }
+
+    @Test
+    fun `el latido no cancela la app en seguimiento si UsageStats no ve nada`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        assertEquals(Action.Ignored, t.onHeartbeat(null))
+        clock.advance(minute)
+        t.onWindowChanged("b")
+        assertEquals(minute, counter.usedMs("a"))
+    }
+
+    @Test
+    fun `el latido bloquea la app limitada recuperada si ya agoto el limite`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(5 * minute)
+        t.onWindowChanged("launcher")
+        assertEquals(Action.Block("a"), t.onHeartbeat("a"))
+    }
+
+    @Test
+    fun `el latido no suma dos veces el tiempo ya contado`() {
+        val t = tracker()
+        t.onWindowChanged("a")
+        clock.advance(2 * minute)
+        t.onWindowChanged("launcher")
+        clock.advance(10 * minute)
+        t.onHeartbeat("a")
+        assertEquals(2 * minute, t.usedSnapshot()["a"])
     }
 }

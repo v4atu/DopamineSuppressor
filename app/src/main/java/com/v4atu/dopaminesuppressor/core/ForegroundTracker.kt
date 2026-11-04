@@ -44,10 +44,25 @@ class ForegroundTracker(
     /**
      * El servicio resuelve la app en primer plano con UsageStats y la entrega aquí: al desbloquear (no
      * siempre llega un evento de ventana) o al confirmar una acción [Action.Verify].
+     *
+     * `null` o un paquete ignorado no dicen que no haya app delante, solo que UsageStats aún no la
+     * conoce: al encender la pantalla directo a una app, su evento de ventana llega antes que el
+     * RESUMED. Si ya hay una app en seguimiento no se toca su temporizador.
      */
     fun onUserPresent(pkg: String?): Action {
-        if (pkg == null || isIgnored(pkg)) return Action.Idle
+        if (pkg == null || isIgnored(pkg)) return if (current != null) Action.Ignored else Action.Idle
         return switchTo(pkg)
+    }
+
+    /**
+     * Latido periódico con la pantalla encendida: `foreground` es lo que UsageStats dice que está delante.
+     * Solo recupera una app limitada que el seguimiento perdió (p. ej. tras un parpadeo del launcher);
+     * si ya es la actual, no es limitada, es ignorada o es `null`, no toca el temporizador en curso.
+     */
+    fun onHeartbeat(foreground: String?): Action {
+        if (foreground == null || isIgnored(foreground)) return Action.Ignored
+        if (foreground == current || foreground !in limits()) return Action.Ignored
+        return switchTo(foreground)
     }
 
     /** Vuelve a evaluar la app actual: temporizador vencido, medianoche o límite editado. */

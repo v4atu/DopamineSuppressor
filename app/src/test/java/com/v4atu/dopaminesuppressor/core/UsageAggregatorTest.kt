@@ -10,6 +10,7 @@ class UsageAggregatorTest {
 
     private fun resumed(pkg: String, t: Long, cls: String? = null) = UsageEvent(UsageEventType.RESUMED, pkg, t, cls)
     private fun paused(pkg: String, t: Long, cls: String? = null) = UsageEvent(UsageEventType.PAUSED, pkg, t, cls)
+    private fun stopped(pkg: String, t: Long, cls: String? = null) = UsageEvent(UsageEventType.STOPPED, pkg, t, cls)
     private fun screenOff(t: Long) = UsageEvent(UsageEventType.SCREEN_OFF, null, t)
 
     private fun summarize(vararg events: UsageEvent, end: Long = 1_000_000L, home: Set<String> = emptySet()) =
@@ -96,6 +97,66 @@ class UsageAggregatorTest {
             paused("a", 110_000, "Main"),
         )
         assertEquals(50_000L, s.totals["a"])
+        assertNull(s.foreground)
+    }
+
+    // Android a veces emite RESUMED y STOPPED sin PAUSED (LinkedIn, 2026-10-31 21:06): STOPPED cierra la actividad.
+
+    @Test
+    fun `un STOPPED sin PAUSED previo cierra la sesion`() {
+        // Sin esto la sesión seguía abierta hasta apagar la pantalla (aquí, ~33 min fantasma).
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            stopped("a", 1_000, "Main"),
+            screenOff(2_000_000),
+            end = 3_000_000L,
+        )
+        assertEquals(1_000L, s.totals["a"])
+        assertNull(s.foreground)
+    }
+
+    @Test
+    fun `un STOPPED despues del PAUSED no cambia nada`() {
+        val s = summarize(
+            resumed("a", 0, "Main"), paused("a", 10_000, "Main"), stopped("a", 10_500, "Main"),
+            resumed("a", 20_000, "Main"), paused("a", 30_000, "Main"),
+        )
+        assertEquals(20_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `un STOPPED de una actividad no abierta no cierra otra del mismo paquete`() {
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            stopped("a", 10_000, "Other"),
+            paused("a", 30_000, "Main"),
+        )
+        assertEquals(30_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `un STOPPED cierra solo la actividad indicada`() {
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            resumed("a", 10_000, "Modal"),
+            stopped("a", 20_000, "Main"),
+            paused("a", 50_000, "Modal"),
+        )
+        assertEquals(50_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `un STOPPED de una app suspendida por el launcher evita que se reabra al irse el launcher`() {
+        // Escenario del 21:06: LinkedIn queda detrás del launcher, se detiene sin PAUSED y luego se abre otra app.
+        val s = summarize(
+            resumed("a", 0, "Main"),
+            resumed("home", 10_000),
+            stopped("a", 11_000, "Main"),
+            paused("home", 50_000),
+            end = 100_000L,
+            home = setOf("home"),
+        )
+        assertEquals(10_000L, s.totals["a"])
         assertNull(s.foreground)
     }
 
@@ -194,6 +255,27 @@ class UsageAggregatorTest {
             home = setOf("home"),
         )
         assertEquals(10_000L, s.totals["a"])
+        assertNull(s.foreground)
+    }
+
+    // Madrugada del 04-nov: parpadeo del launcher (RESUMED/PAUSED/STOPPED en el mismo segundo) sobre Instagram abierta.
+    private val night = arrayOf(
+        resumed("a", 0),
+        resumed("home", 21 * 60_000L, "Quickstep"),
+        paused("home", 21 * 60_000L, "Quickstep"),
+        stopped("home", 21 * 60_000L, "Quickstep"),
+    )
+
+    @Test
+    fun `un parpadeo del launcher no quita la app de primer plano si se lee desde su RESUMED`() {
+        val s = summarize(*night, end = 60 * 60_000L, home = setOf("home"))
+        assertEquals("a", s.foreground)
+        assertEquals(60 * 60_000L, s.totals["a"])
+    }
+
+    @Test
+    fun `con una ventana corta que no incluye el RESUMED la app se pierde`() {
+        val s = summarize(*night.drop(1).toTypedArray(), end = 60 * 60_000L, home = setOf("home"))
         assertNull(s.foreground)
     }
 

@@ -1,6 +1,6 @@
 package com.v4atu.dopaminesuppressor.core
 
-enum class UsageEventType { RESUMED, PAUSED, SCREEN_OFF }
+enum class UsageEventType { RESUMED, PAUSED, STOPPED, SCREEN_OFF }
 
 /**
  * Evento de UsageStats reducido a lo que importa para contar; `timestamp` en ms.
@@ -51,6 +51,21 @@ object UsageAggregator {
             if (pkg in limited) totals.merge(pkg, at - start, Long::plus)
         }
 
+        // La actividad ya no está delante (PAUSED) o ya no es visible (STOPPED); el paquete se cierra con la última.
+        fun release(pkg: String, className: String?, at: Long) {
+            suspended[pkg]?.let {
+                it.remove(className)
+                if (it.isEmpty()) suspended.remove(pkg)
+            }
+            val remaining = activities[pkg] ?: return
+            remaining.remove(className)
+            if (remaining.isEmpty()) {
+                activities.remove(pkg)
+                close(pkg, at)
+                if (foreground == pkg) foreground = null
+            }
+        }
+
         for (event in events) {
             val pkg = event.packageName
             when (event.type) {
@@ -69,19 +84,7 @@ object UsageAggregator {
                     foreground = pkg
                 }
                 UsageEventType.PAUSED -> if (pkg != null) {
-                    suspended[pkg]?.let {
-                        it.remove(event.className)
-                        if (it.isEmpty()) suspended.remove(pkg)
-                    }
-                    val remaining = activities[pkg]
-                    if (remaining != null) {
-                        remaining.remove(event.className)
-                        if (remaining.isEmpty()) {
-                            activities.remove(pkg)
-                            close(pkg, event.timestamp)
-                            if (foreground == pkg) foreground = null
-                        }
-                    }
+                    release(pkg, event.className, event.timestamp)
                     // Si el launcher se va y la app nunca se pausó (se tocó su tarjeta), vuelve a estar delante.
                     if (pkg in home && suspended.isNotEmpty()) {
                         for ((other, classes) in suspended) {
@@ -92,6 +95,8 @@ object UsageAggregator {
                         suspended.clear()
                     }
                 }
+                // Android a veces emite STOPPED sin PAUSED: sin esto la sesión seguía abierta hasta apagar la pantalla.
+                UsageEventType.STOPPED -> if (pkg != null) release(pkg, event.className, event.timestamp)
                 UsageEventType.SCREEN_OFF -> {
                     open.keys.toList().forEach { close(it, event.timestamp) }
                     activities.clear()

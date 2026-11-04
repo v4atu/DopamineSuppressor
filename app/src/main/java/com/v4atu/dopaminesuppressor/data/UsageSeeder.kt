@@ -27,6 +27,7 @@ class UsageSeeder(private val usm: UsageStatsManager, private val home: Set<Stri
                 val type = when (event.eventType) {
                     UsageEvents.Event.ACTIVITY_RESUMED -> UsageEventType.RESUMED
                     UsageEvents.Event.ACTIVITY_PAUSED -> UsageEventType.PAUSED
+                    UsageEvents.Event.ACTIVITY_STOPPED -> UsageEventType.STOPPED
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> UsageEventType.SCREEN_OFF
                     else -> continue
                 }

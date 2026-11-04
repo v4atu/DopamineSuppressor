@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log // TEMP-DIAG
 import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
@@ -39,7 +40,16 @@ class GuardService : AccessibilityService() {
     // Confirma con UsageStats la app en primer plano tras salir de una limitada (SPEC §4).
     private val verify = Runnable {
         diag("verify fired") // TEMP-DIAG
-        resolveForeground(retry = true, windowMs = VERIFY_WINDOW_MS)
+        resolveForeground(retry = true, windowMs = LOOKBACK_MS)
+    }
+    // Latido con la pantalla encendida: recupera una app limitada que el seguimiento perdió (04-nov).
+    private var heartbeatActive = false
+    private val heartbeat = Runnable {
+        readForeground(LOOKBACK_MS) { foreground ->
+            diag("heartbeat fg=$foreground") // TEMP-DIAG
+            if (heartbeatActive) apply(tracker.onHeartbeat(foreground))
+        }
+        scheduleHeartbeat()
     }
     private val counter = UsageCounter(AndroidClock)
 
@@ -70,12 +80,14 @@ class GuardService : AccessibilityService() {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     diag("screen off") // TEMP-DIAG
+                    stopHeartbeat()
                     cancelPending()
                     apply(tracker.onScreenOff())
                 }
                 Intent.ACTION_USER_PRESENT -> {
                     diag("user present") // TEMP-DIAG
                     resolveForeground(retry = true)
+                    startHeartbeat()
                 }
             }
         }
@@ -101,6 +113,7 @@ class GuardService : AccessibilityService() {
             addAction(Intent.ACTION_USER_PRESENT)
         }
         registerReceiver(screenReceiver, filter)
+        if (getSystemService(PowerManager::class.java).isInteractive) startHeartbeat()
 
         // Un único colector: la primera emisión carga los límites y siembra el conteo (SPEC §5).
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main).also { scope = it }
@@ -119,6 +132,7 @@ class GuardService : AccessibilityService() {
     override fun onDestroy() {
         scope?.cancel()
         scope = null
+        heartbeatActive = false
         handler.removeCallbacksAndMessages(null)
         runCatching { unregisterReceiver(screenReceiver) }
         background?.shutdownNow()
@@ -206,19 +220,39 @@ class GuardService : AccessibilityService() {
      * Si el `ACTIVITY_RESUMED` aún no está disponible, se reintenta una vez tras 500 ms.
      */
     private fun resolveForeground(retry: Boolean, windowMs: Long = UNLOCK_WINDOW_MS) {
+        readForeground(windowMs) { foreground ->
+            diag("resolve retry=$retry windowMs=$windowMs foreground=$foreground") // TEMP-DIAG
+            if (foreground == null && retry) {
+                handler.postDelayed({ resolveForeground(retry = false, windowMs = windowMs) }, RETRY_DELAY_MS)
+            } else {
+                apply(tracker.onUserPresent(foreground))
+            }
+        }
+    }
+
+    /** Lee de UsageStats la app en primer plano (fuera del hilo principal) y entrega el resultado en él. */
+    private fun readForeground(windowMs: Long, onResult: (String?) -> Unit) {
         val seeder = seeder ?: return
         background?.execute {
             val end = System.currentTimeMillis()
             val foreground = seeder.read(end - windowMs, end, emptySet()).foreground
-            handler.post {
-                diag("resolve retry=$retry windowMs=$windowMs foreground=$foreground") // TEMP-DIAG
-                if (foreground == null && retry) {
-                    handler.postDelayed({ resolveForeground(retry = false, windowMs = windowMs) }, RETRY_DELAY_MS)
-                } else {
-                    apply(tracker.onUserPresent(foreground))
-                }
-            }
+            handler.post { onResult(foreground) }
         }
+    }
+
+    private fun startHeartbeat() {
+        heartbeatActive = true
+        scheduleHeartbeat()
+    }
+
+    private fun scheduleHeartbeat() {
+        handler.removeCallbacks(heartbeat)
+        if (heartbeatActive) handler.postDelayed(heartbeat, HEARTBEAT_MS)
+    }
+
+    private fun stopHeartbeat() {
+        heartbeatActive = false
+        handler.removeCallbacks(heartbeat)
     }
 
     // TEMP-DIAG: logcat más archivo `files/guard-diag.log` (leer con `adb shell run-as <paquete> cat files/guard-diag.log`).
@@ -243,8 +277,10 @@ class GuardService : AccessibilityService() {
         val DIAG_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS") // TEMP-DIAG
         const val SYSTEM_UI = "com.android.systemui"
         const val UNLOCK_WINDOW_MS = 10_000L
-        // La confirmación debe ver el RESUMED de la app aunque sea anterior al desbloqueo.
-        const val VERIFY_WINDOW_MS = 5 * 60_000L
+        // Verify y el latido deben ver el RESUMED de la app aunque sea de hace horas (sesión larga sin eventos).
+        // Solo calculan el primer plano (sin totales); un SCREEN_OFF en la ventana lo reinicia.
+        const val LOOKBACK_MS = 24 * 60 * 60_000L
+        const val HEARTBEAT_MS = 5 * 60_000L
         const val RETRY_DELAY_MS = 500L
     }
 }

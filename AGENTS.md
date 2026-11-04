@@ -35,6 +35,7 @@ Capas por paquete en `com.v4atu.dopaminesuppressor`:
 - **Hilos**: todo el estado del servicio se toca en el hilo principal; las lecturas de UsageStats van a un executor de un solo hilo y vuelven con `handler.post`.
 - UI y servicio corren en el **mismo proceso**: comparten el DataStore (cambios en la UI llegan al servicio por el `Flow`) y el objeto `GuardState.counted`, una copia diagnóstica temporal del contador interno que la UI muestra junto al uso de UsageStats.
 - Al desbloquear (`ACTION_USER_PRESENT`) no siempre llega evento de ventana: el servicio consulta UsageStats de los últimos 10 s y reintenta una vez a los 500 ms.
+- `Verify` (tras salir de una app limitada) y el **latido** resuelven el primer plano con UsageStats leyendo las últimas 24 h (`LOOKBACK_MS`): una ventana corta pierde el `RESUMED` de una sesión larga y deja de seguir la app. El latido corre cada 5 min solo con la pantalla encendida (se detiene en `ACTION_SCREEN_OFF`) y `ForegroundTracker.onHeartbeat` solo recupera una app limitada que no es la actual; nunca toca la que ya está en seguimiento.
 - Se ignoran como cambio de app: el propio paquete, `com.android.systemui` y los teclados habilitados.
 - Los comentarios citan "SPEC §4" (seguimiento de primer plano) y "SPEC §5" (siembra desde UsageStats); ese documento no está en el repo.
 
